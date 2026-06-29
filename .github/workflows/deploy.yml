@@ -5,6 +5,10 @@ on:
     branches:
       - main
 
+permissions:
+  id-token: write
+  contents: read
+
 env:
   AWS_REGION: ap-south-1
   CLUSTER_NAME: TCS-EKS-Cluster-01
@@ -21,11 +25,10 @@ jobs:
       - name: Checkout Source Code
         uses: actions/checkout@v4
 
-      - name: Configure AWS Credentials
+      - name: Configure AWS Credentials (OIDC)
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
 
       - name: Install kubectl
@@ -51,11 +54,11 @@ jobs:
           docker push \
           ${{ steps.login-ecr.outputs.registry }}/$ECR_REPOSITORY:${{ github.sha }}
 
-      - name: Configure kubectl for Amazon EKS
+      - name: Configure kubeconfig
         run: |
           aws eks update-kubeconfig \
-            --region $AWS_REGION \
-            --name $CLUSTER_NAME
+            --name $CLUSTER_NAME \
+            --region $AWS_REGION
 
       - name: Deploy Kubernetes Manifests
         run: |
@@ -66,14 +69,14 @@ jobs:
       - name: Update Deployment Image
         run: |
           kubectl set image deployment/$DEPLOYMENT_NAME \
-          $CONTAINER_NAME=${{ steps.login-ecr.outputs.registry }}/$ECR_REPOSITORY:${{ github.sha }} \
-          -n $K8S_NAMESPACE
+            $CONTAINER_NAME=${{ steps.login-ecr.outputs.registry }}/$ECR_REPOSITORY:${{ github.sha }} \
+            -n $K8S_NAMESPACE
 
       - name: Wait for Rollout
         run: |
           kubectl rollout status deployment/$DEPLOYMENT_NAME \
-          -n $K8S_NAMESPACE \
-          --timeout=300s
+            -n $K8S_NAMESPACE \
+            --timeout=300s
 
       - name: Verify Deployment
         run: |
