@@ -1,0 +1,61 @@
+name: Deploy to EKS
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ap-south-1
+
+      - name: Install kubectl
+        uses: azure/setup-kubectl@v4
+        with:
+          version: latest
+
+      - name: Login to ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build Docker image
+        run: |
+          docker build -t nginx-app .
+
+      - name: Tag image
+        run: |
+          docker tag nginx-app:latest \
+          ${{ steps.login-ecr.outputs.registry }}/nginx-app:${{ github.sha }}
+
+      - name: Push image
+        run: |
+          docker push \
+          ${{ steps.login-ecr.outputs.registry }}/nginx-app:${{ github.sha }}
+
+      - name: Update kubeconfig
+        run: |
+          aws eks update-kubeconfig \
+            --name TCS-EKS-Cluster-01 \
+            --region ap-south-1
+
+      - name: Deploy
+        run: |
+          kubectl set image deployment/nginx \
+          nginx=${{ steps.login-ecr.outputs.registry }}/nginx-app:${{ github.sha }}
+
+          kubectl rollout status deployment/nginx
+
+      - name: Verify
+        run: |
+          kubectl get pods
+          kubectl get deployment
